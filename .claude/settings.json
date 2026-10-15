@@ -15,6 +15,7 @@
   },
   "enabledPlugins": {
     "superpowers@superpowers-marketplace": true,
-    "playwright@claude-plugins-official": true
+    "playwright@claude-plugins-official": true,
+    "github@claude-plugins-official": true
   }
 }

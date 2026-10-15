@@ -215,7 +215,12 @@ scripts/i18n/_pending-keys.json
 # AI agent local settings and configs
 .agents/
 .antigravitycli/
-/.claude/
+/.claude/*
+# Shared Claude Code cloud-session setup (SessionStart hook); worktrees and
+# local settings under .claude/ stay ignored.
+!/.claude/settings.json
+!/.claude/hooks/
+!/.claude/hooks/*
 
 # PR Reviews and local feedback files
 pr_reviews*.json

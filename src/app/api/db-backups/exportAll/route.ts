@@ -6,18 +6,30 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { execFileSync } from "node:child_process";
-import { isAuthenticated } from "@/shared/utils/apiAuth";
+import {
+  CREDENTIAL_EXPORT_FORBIDDEN_MESSAGE,
+  requireOperatorCredential,
+} from "@/lib/api/operatorCredential";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 
 /**
  * GET /api/db-backups/exportAll
  * Exports the entire database + settings as a ZIP archive
- * Security: Requires admin authentication.
+ * Security: operator-only (dashboard session, local CLI, or login disabled); API keys
+ * and `oma_` access tokens get 403.
  */
 export async function GET(request: NextRequest) {
-  if (!(await isAuthenticated(request)))
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Hands out every stored credential: operator only (dashboard session, local CLI, or login
+  // disabled). API keys of any scope and `oma_` access tokens get 403.
+  const operatorVerdict = await requireOperatorCredential(request, {
+    forbiddenMessage: CREDENTIAL_EXPORT_FORBIDDEN_MESSAGE,
+  });
+  if (operatorVerdict.ok === false) return operatorVerdict.response;
 
+  return buildFullExportResponse();
+}
+
+async function buildFullExportResponse(): Promise<Response> {
   try {
     if (!SQLITE_FILE) {
       return NextResponse.json(

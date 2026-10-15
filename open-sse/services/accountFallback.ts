@@ -108,6 +108,8 @@ import { capScaledCooldownMs } from "./accountFallback/cooldownCap.ts";
 import { resolveApiKeyForbiddenFallback } from "./accountFallback/nonRetryableUpstream.ts";
 import * as exactModelLock from "./accountFallback/exactModelLock.ts";
 import { isCreditsExhaustedWithSharedWallet } from "./accountFallback/sharedWalletCredits.ts";
+import { CREDITS_EXHAUSTED_SIGNALS } from "./accountFallback/creditExhaustionSignals.ts";
+export { CREDITS_EXHAUSTED_SIGNALS } from "./accountFallback/creditExhaustionSignals.ts";
 import { isMistralAmbiguous401 } from "./accountFallback/mistralAmbiguousAuth.ts";
 import { isMistralAmbiguous401SoftLockoutEnabled } from "@/shared/utils/featureFlags";
 export type ProviderProfile = {
@@ -222,43 +224,6 @@ export function getMergedBannedSignals(): string[] {
   if (_customBannedSignals.length === 0) return ACCOUNT_DEACTIVATED_SIGNALS;
   return [...ACCOUNT_DEACTIVATED_SIGNALS, ..._customBannedSignals];
 }
-
-// T10 (sub2api PR #1169): Signals that indicate billing credits are exhausted.
-// Distinct from rate-limit 429 — the account won't recover until credits are added.
-export const CREDITS_EXHAUSTED_SIGNALS = [
-  "insufficient_quota",
-  "billing_hard_limit_reached",
-  "exceeded your current quota",
-  "exceeded your current usage quota",
-  "credit_balance_too_low",
-  "your credit balance is too low",
-  "credits exhausted",
-  "out of credits",
-  "payment required",
-  "free tier of the model has been exhausted",
-  // #8631: narrower than a bare "has been exhausted" — that generic phrase also
-  // appears in Gemini's transient RPM/TPM 429 body ("Resource has been exhausted
-  // (e.g. check quota)."), which must stay RATE_LIMIT_EXCEEDED, not terminal.
-  // Anchoring on "tier" keeps free-tier depletion wording matched while excluding
-  // Gemini's "resource has been exhausted" rate-limit phrasing.
-  "tier has been exhausted",
-  // #5239: providers (e.g. DeepSeek/GLM-style) return "Insufficient account balance"
-  // on a depleted key. 402 is already terminalized by status, but catch non-402
-  // out-of-credit bodies here too.
-  "insufficient balance",
-  "insufficient_balance",
-  "insufficient account balance",
-  "insufficient credit balance",
-  // Command Code returns 400 "You have insufficient credits to make this
-  // request. Please purchase more credits to continue using the service."
-  // when the account's billing credits run out. Without this signal the
-  // error stays unclassified (errorType=null), so the connection is never
-  // marked credits_exhausted and keeps being re-selected on every request.
-  "insufficient credits",
-  "insufficient credit",
-  // FriendliAI 403 when free tier credits are depleted via adaptive rate limits
-  "exhausted all your credits",
-];
 
 // T11: Signals that indicate OAuth token is invalid/expired (not permanent deactivation)
 export const OAUTH_INVALID_TOKEN_SIGNALS = [
@@ -1858,6 +1823,28 @@ export function checkFallbackError(
   const shouldUseQuotaSignal = !isRateLimitStatus || preserveQuota429;
 
   // Check error message FIRST - specific patterns take priority over status codes
+  // A retired model will fail identically on every future request — lock it for
+  // a long, fixed window instead of the generic transient-error branch's short
+  // backoff, which would otherwise keep re-selecting a permanently dead model
+  // roughly every cooldown window, all day, hammering the provider with
+  // guaranteed-to-fail requests. A 404 needs a known wording (see
+  // MODEL_PERMANENTLY_UNAVAILABLE_PATTERNS); a 410 locks on status alone — any
+  // wording, empty or missing text included (e.g. Ollama `was retired`).
+  // `quotaResetHintMs` flows into combo.ts's per-request model-lockout as an
+  // upstream-verified reset, honored in full, not clamped to the ~20min ceiling.
+  if (
+    status === HTTP_STATUS.GONE ||
+    (status === HTTP_STATUS.NOT_FOUND && isModelPermanentlyUnavailable(errorStr))
+  ) {
+    const cooldownMs = 24 * 60 * 60 * 1000; // 24h
+    return {
+      shouldFallback: true,
+      cooldownMs,
+      reason: "not_found",
+      quotaResetHintMs: cooldownMs,
+    };
+  }
+
   if (errorText) {
     // T06 (sub2api #1037): Permanent account deactivation — do NOT retry, mark as permanent failure
     if (isAccountDeactivated(errorStr)) {
@@ -1866,28 +1853,6 @@ export function checkFallbackError(
         cooldownMs: 365 * 24 * 60 * 60 * 1000, // 1 year = effectively permanent
         reason: RateLimitReason.AUTH_ERROR,
         permanent: true,
-      };
-    }
-
-    // A retired model (Gemini deprecated-model 404, Fireworks/etc. end-of-life 410)
-    // will fail identically on every future request — lock it for a long, fixed
-    // window instead of falling through to the generic transient-error branch's
-    // short backoff, which would otherwise keep re-selecting a permanently dead
-    // model roughly every cooldown window, all day, hammering the provider with
-    // guaranteed-to-fail requests (see MODEL_PERMANENTLY_UNAVAILABLE_PATTERNS).
-    // `quotaResetHintMs` flows into combo.ts's per-request model-lockout as an
-    // upstream-verified reset, so it is honored in full and not clamped to the
-    // normal ~20min model-lockout ceiling.
-    if (
-      (status === HTTP_STATUS.NOT_FOUND || status === HTTP_STATUS.GONE) &&
-      isModelPermanentlyUnavailable(errorStr)
-    ) {
-      const cooldownMs = 24 * 60 * 60 * 1000; // 24h
-      return {
-        shouldFallback: true,
-        cooldownMs,
-        reason: "not_found",
-        quotaResetHintMs: cooldownMs,
       };
     }
 

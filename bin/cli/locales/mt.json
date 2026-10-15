@@ -1169,32 +1169,18 @@
   "sync": {
     "description": "Sinkronizza l-konfigurazzjoni bejn l-istanzi ta' OmniRoute",
     "push": {
-      "description": "Imbotta l-konfigurazzjoni lejn cloud jew istanza remota",
-      "target": "Mira (cloud or context:name)",
-      "bundle": "Partijiet tal-bundle biex jiġu sinkronizzati",
-      "dryRun": "Previżjoni mingħajr applikazzjoni"
+      "description": "Imbotta l-konfigurazzjoni lejn cloud jew istanza remota"
     },
     "pull": {
-      "description": "Iġbed il-konfigurazzjoni minn cloud jew remota",
-      "source": "Sors (cloud or context:name)",
-      "merge": "Għaqqad mal-konfigurazzjoni eżistenti",
-      "replace": "Issostitwixxi l-konfigurazzjoni eżistenti",
-      "dryRun": "Ara minn qabel mingħajr ma tapplika"
-    },
-    "diff": {
-      "source": "Kuntest tas-sors",
-      "target": "Kuntest tal-mira"
+      "description": "Iġbed il-konfigurazzjoni minn cloud jew remota"
     },
     "bundle": {
       "description": "Esporta l-konfigurazzjoni bħala fajl bundle",
-      "include": "Partijiet li tinkludi (separati b'virgola)"
+      "token": "Sync token (from `sync tokens create`); defaults to OMNIROUTE_SYNC_TOKEN"
     },
     "import": {
       "description": "Importa fajl bundle",
       "dryRun": "Ivvalida mingħajr ma tapplika"
-    },
-    "initialize": {
-      "fromCloud": "Inizjalizza minn backup fil-cloud"
     },
     "tokens": {
       "description": "Immaniġġja t-tokens tas-sinkronizzazzjoni",
@@ -1206,9 +1192,6 @@
       "revoke": {
         "yes": "Aqbeż il-konferma"
       }
-    },
-    "resolve": {
-      "description": "Issolvi l-kunflitti tas-sinkronizzazzjoni b'mod interattiv"
     }
   },
   "config": {

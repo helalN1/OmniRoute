@@ -1,3 +1,4 @@
+import { credentialCooldownResponse } from "./credentialCooldownResponse";
 import {
   getModelInfo,
   getComboForModel,
@@ -23,7 +24,6 @@ import {
 } from "@omniroute/open-sse/utils/resourcePressure.ts";
 import {
   errorResponse,
-  modelCooldownResponse,
   providerCircuitOpenResponse,
   unavailableResponse,
 } from "@omniroute/open-sse/utils/error.ts";
@@ -52,10 +52,8 @@ import { classify429FromError, type FailureKind } from "../../shared/utils/class
 import { resolveUseUpstream429BreakerHints } from "../../shared/utils/providerHints";
 import { resolveProviderId } from "../../shared/constants/providers";
 import { classifyProviderProbeResult } from "./providerProbeClassification";
-import {
-  inheritProviderProbeResponse,
-  markProviderProbeResponse,
-} from "../../shared/utils/providerProbeResult";
+import { markProviderProbeResponse } from "../../shared/utils/providerProbeResult";
+import { inheritResponsePolicies } from "./chat/responsePolicies.ts";
 import { isFeatureFlagEnabled } from "../../shared/utils/featureFlags";
 
 import { noteProxyOutcome } from "./proxyOutcomeMemory";
@@ -762,6 +760,11 @@ function asShadowedCompatibleNode(
   return { id, name: trimmedString(record.name) || null, prefix };
 }
 
+// The status-table defaults read as "your OmniRoute API key is invalid" (401) or
+// "unknown model" (404); the actual fix is connecting an account in the dashboard.
+// Only the code is overridden so the status/type pairing SDKs rely on is kept.
+const PROVIDER_NOT_CONFIGURED = { code: "provider_not_configured" } as const;
+
 export function handleNoCredentials(
   credentials: any,
   excludeConnectionId: string | null,
@@ -775,37 +778,7 @@ export function handleNoCredentials(
   correlationId?: string | null
 ) {
   if (credentials?.allRateLimited) {
-    const errorMsg = lastError || credentials.lastError || "Unavailable";
-    const status =
-      lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;
-    const cooldownModel =
-      typeof credentials.cooldownModel === "string" && credentials.cooldownModel.trim().length > 0
-        ? credentials.cooldownModel.trim()
-        : model;
-
-    if (credentials.cooldownScope === "model" && Number(status) === HTTP_STATUS.RATE_LIMITED) {
-      log.warn(
-        "CHAT",
-        `[${provider}/${cooldownModel}] all credentials cooling down${
-          credentials.retryAfterHuman ? ` (${credentials.retryAfterHuman})` : ""
-        }`
-      );
-      return modelCooldownResponse({
-        model: cooldownModel,
-        retryAfter: credentials.retryAfter,
-        retryAfterAt: typeof credentials.retryAfter === "string" ? credentials.retryAfter : null,
-        credentialsCoolingCount:
-          typeof credentials.connectionsCount === "number" ? credentials.connectionsCount : null,
-      });
-    }
-
-    log.warn("CHAT", `[${provider}/${model}] ${errorMsg} (${credentials.retryAfterHuman})`);
-    return unavailableResponse(
-      status,
-      `[${provider}/${model}] ${errorMsg}`,
-      credentials.retryAfter,
-      credentials.retryAfterHuman
-    );
+    return credentialCooldownResponse(credentials, provider, model, lastError, lastStatus);
   }
 
   if (lastError && lastStatus) {
@@ -915,13 +888,15 @@ export function handleNoCredentials(
           : HTTP_STATUS.SERVICE_UNAVAILABLE;
       return errorResponse(
         singleModelStatus,
-        `No active credentials for provider: ${provider}.${hint}`
+        `No active credentials for provider: ${provider}.${hint}`,
+        singleModelStatus === HTTP_STATUS.UNAUTHORIZED ? PROVIDER_NOT_CONFIGURED : undefined
       );
     }
 
     return errorResponse(
       HTTP_STATUS.NOT_FOUND,
-      `No active credentials for provider: ${provider}.${hint}`
+      `No active credentials for provider: ${provider}.${hint}`,
+      PROVIDER_NOT_CONFIGURED
     );
   }
   log.warn("CHAT", "No more accounts available", { provider });
@@ -1279,6 +1254,6 @@ export function withSelectedConnectionHeader(
     });
     cloned.headers.set("X-OmniRoute-Selected-Connection-Id", connectionId);
     const trusted = inheritTrustedLocalRateLimitResponse(response, cloned);
-    return inheritProviderProbeResponse(response, trusted);
+    return inheritResponsePolicies(response, trusted);
   }
 }

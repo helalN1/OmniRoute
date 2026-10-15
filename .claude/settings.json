@@ -16,6 +16,7 @@
   "enabledPlugins": {
     "superpowers@superpowers-marketplace": true,
     "playwright@claude-plugins-official": true,
-    "github@claude-plugins-official": true
+    "github@claude-plugins-official": true,
+    "canva@claude-plugins-official": true
   }
 }
